@@ -21,7 +21,7 @@
  */
 
 //class name. Use something descriptive and leave the ": public Usermod" part :)
-class MyExampleUsermod : public Usermod {
+class UsermodBrightnessGroups : public Usermod {
 
   private:
 
@@ -29,26 +29,16 @@ class MyExampleUsermod : public Usermod {
     bool enabled = false;
     bool initDone = false;
     unsigned long lastTime = 0;
+    static const uint8_t max_groups = 4;
 
     // set your config variables to their boot default value (this can also be done in readFromConfig() or a constructor if you prefer)
-    bool testBool = false;
-    unsigned long testULong = 42424242;
-    float testFloat = 42.42;
-    String testString = "Forty-Two";
-
-    // These config variables have defaults set inside readFromConfig()
-    int testInt;
-    long testLong;
-    int8_t testPins[2];
+    uint8_t group_scale[max_groups+1];
+    //String pixel_group[max_groups+1];
+    uint8_t *pixel_groups = NULL;
 
     // string that are used multiple time (this will save some flash memory)
     static const char _name[];
     static const char _enabled[];
-
-
-    // any private methods should go here (non-inline method should be defined out of class)
-    void publishMqtt(const char* state, bool retain = false); // example for publishing MQTT message
-
 
   public:
 
@@ -64,23 +54,43 @@ class MyExampleUsermod : public Usermod {
      */
     inline bool isEnabled() { return enabled; }
 
-    // in such case add the following to another usermod:
-    //  in private vars:
-    //   #ifdef USERMOD_EXAMPLE
-    //   MyExampleUsermod* UM;
-    //   #endif
-    //  in setup()
-    //   #ifdef USERMOD_EXAMPLE
-    //   UM = (MyExampleUsermod*) usermods.lookup(USERMOD_ID_EXAMPLE);
-    //   #endif
-    //  somewhere in loop() or other member method
-    //   #ifdef USERMOD_EXAMPLE
-    //   if (UM != nullptr) isExampleEnabled = UM->isEnabled();
-    //   if (!isExampleEnabled) UM->enable(true);
-    //   #endif
+    void process_pixel_group_str(uint8_t group, char *pixel_group_str) {
+      if (!initDone) return;
 
+      char *token = NULL;
+      char delim[2] = ",";
+      uint8_t pixel;
 
-    // methods called by WLED (can be inlined as they are called only once but if you call them explicitly define them out of class)
+      token = strtok(pixel_group_str, delim);
+      while (token != NULL)
+      {
+        pixel = atoi(token);
+        if (pixel != 0 && pixel <= strip.getLengthPhysical())
+        {
+          pixel_groups[pixel-1] = group;
+        }
+        token = strtok(NULL, delim);
+      }
+    }
+
+    String generate_formatted_pixel_group(uint8_t group)
+    {
+      String formatted = "";
+      if (pixel_groups == NULL) return formatted;
+
+      bool started = false;
+      for (int pixel = 0; pixel < strip.getLengthPhysical(); pixel++)
+      {
+        if (pixel_groups[pixel] == group)
+        {
+          if (started) formatted += ",";
+          else started = true;
+          formatted += String(pixel+1, DEC);
+        }
+      }
+
+      return formatted;
+    }
 
     /*
      * setup() is called once at boot. WiFi is not yet connected at this point.
@@ -88,20 +98,11 @@ class MyExampleUsermod : public Usermod {
      * You can use it to initialize variables, sensors or similar.
      */
     void setup() {
-      // do your set-up here
-      //Serial.println("Hello from my usermod!");
+      // Group 0 is our default and always fixed at 100% brightness scaling
+      group_scale[0] = 100;
+
       initDone = true;
     }
-
-
-    /*
-     * connected() is called every time the WiFi is (re)connected
-     * Use it to initialize network interfaces
-     */
-    void connected() {
-      //Serial.println("Connected to WiFi!");
-    }
-
 
     /*
      * loop() is called continuously. Here you can check for events, read sensors, etc.
@@ -124,66 +125,6 @@ class MyExampleUsermod : public Usermod {
         lastTime = millis();
       }
     }
-
-
-    /*
-     * addToJsonInfo() can be used to add custom entries to the /json/info part of the JSON API.
-     * Creating an "u" object allows you to add custom key/value pairs to the Info section of the WLED web UI.
-     * Below it is shown how this could be used for e.g. a light sensor
-     */
-    void addToJsonInfo(JsonObject& root)
-    {
-      // if "u" object does not exist yet wee need to create it
-      JsonObject user = root["u"];
-      if (user.isNull()) user = root.createNestedObject("u");
-
-      //this code adds "u":{"ExampleUsermod":[20," lux"]} to the info object
-      //int reading = 20;
-      //JsonArray lightArr = user.createNestedArray(FPSTR(_name))); //name
-      //lightArr.add(reading); //value
-      //lightArr.add(F(" lux")); //unit
-
-      // if you are implementing a sensor usermod, you may publish sensor data
-      //JsonObject sensor = root[F("sensor")];
-      //if (sensor.isNull()) sensor = root.createNestedObject(F("sensor"));
-      //temp = sensor.createNestedArray(F("light"));
-      //temp.add(reading);
-      //temp.add(F("lux"));
-    }
-
-
-    /*
-     * addToJsonState() can be used to add custom entries to the /json/state part of the JSON API (state object).
-     * Values in the state object may be modified by connected clients
-     */
-    void addToJsonState(JsonObject& root)
-    {
-      if (!initDone || !enabled) return;  // prevent crash on boot applyPreset()
-
-      JsonObject usermod = root[FPSTR(_name)];
-      if (usermod.isNull()) usermod = root.createNestedObject(FPSTR(_name));
-
-      //usermod["user0"] = userVar0;
-    }
-
-
-    /*
-     * readFromJsonState() can be used to receive data clients send to the /json/state part of the JSON API (state object).
-     * Values in the state object may be modified by connected clients
-     */
-    void readFromJsonState(JsonObject& root)
-    {
-      if (!initDone) return;  // prevent crash on boot applyPreset()
-
-      JsonObject usermod = root[FPSTR(_name)];
-      if (!usermod.isNull()) {
-        // expect JSON usermod data in usermod name object: {"ExampleUsermod:{"user0":10}"}
-        userVar0 = usermod["user0"] | userVar0; //if "user0" key exists in JSON, update, else keep old value
-      }
-      // you can as well check WLED state JSON keys
-      //if (root["bri"] == 255) Serial.println(F("Don't burn down your garage!"));
-    }
-
 
     /*
      * addToConfig() can be used to add custom persistent settings to the cfg.json file in the "um" (usermod) object.
@@ -225,16 +166,14 @@ class MyExampleUsermod : public Usermod {
       JsonObject top = root.createNestedObject(FPSTR(_name));
       top[FPSTR(_enabled)] = enabled;
       //save these vars persistently whenever settings are saved
-      top["great"] = userVar0;
-      top["testBool"] = testBool;
-      top["testInt"] = testInt;
-      top["testLong"] = testLong;
-      top["testULong"] = testULong;
-      top["testFloat"] = testFloat;
-      top["testString"] = testString;
-      JsonArray pinArray = top.createNestedArray("pin");
-      pinArray.add(testPins[0]);
-      pinArray.add(testPins[1]); 
+      String groupName = "Group 0";
+      for (int group = 1; group <= max_groups; group++)
+      {
+        groupName[6] = group + '0';
+        JsonObject groupJson = top.createNestedObject(groupName);
+        groupJson["scale"] = group_scale[group];
+        groupJson["pixels"] = generate_formatted_pixel_group(group);
+      }
     }
 
 
@@ -261,20 +200,25 @@ class MyExampleUsermod : public Usermod {
       JsonObject top = root[FPSTR(_name)];
 
       bool configComplete = !top.isNull();
+      
+      String groupName = "group0";
+      String pixelGroup = "";
+      for (int group = 1; group <= max_groups; group++)
+      {
+        groupName[5] = group + '0';
 
-      configComplete &= getJsonValue(top["great"], userVar0);
-      configComplete &= getJsonValue(top["testBool"], testBool);
-      configComplete &= getJsonValue(top["testULong"], testULong);
-      configComplete &= getJsonValue(top["testFloat"], testFloat);
-      configComplete &= getJsonValue(top["testString"], testString);
+        configComplete &= getJsonValue(top[groupName]["scale"], group_scale[group], 100);
+        if (group_scale[group] > 100) group_scale[group] = 100;
 
-      // A 3-argument getJsonValue() assigns the 3rd argument as a default value if the Json value is missing
-      configComplete &= getJsonValue(top["testInt"], testInt, 42);  
-      configComplete &= getJsonValue(top["testLong"], testLong, -42424242);
-
-      // "pin" fields have special handling in settings page (or some_pin as well)
-      configComplete &= getJsonValue(top["pin"][0], testPins[0], -1);
-      configComplete &= getJsonValue(top["pin"][1], testPins[1], -1);
+        configComplete &= getJsonValue(top[groupName]["pixels"], pixelGroup, "");
+        if (pixel_groups == NULL)
+        {
+          pixel_groups = (byte*) malloc(strip.getLengthPhysical());
+          if (!pixel_groups) { DEBUG_PRINTLN(F("!!! BrightnessGroup allocation failed. !!!")); return false; } //allocation failed   
+        }
+        
+        process_pixel_group_str(group, strdup(pixelGroup.c_str()));
+      }
 
       return configComplete;
     }
@@ -287,11 +231,22 @@ class MyExampleUsermod : public Usermod {
      */
     void appendConfigData()
     {
-      oappend(SET_F("addInfo('")); oappend(String(FPSTR(_name)).c_str()); oappend(SET_F(":great")); oappend(SET_F("',1,'<i>(this is a great config value)</i>');"));
-      oappend(SET_F("addInfo('")); oappend(String(FPSTR(_name)).c_str()); oappend(SET_F(":testString")); oappend(SET_F("',1,'enter any string you want');"));
-      oappend(SET_F("dd=addDropdown('")); oappend(String(FPSTR(_name)).c_str()); oappend(SET_F("','testInt');"));
-      oappend(SET_F("addOption(dd,'Nothing',0);"));
-      oappend(SET_F("addOption(dd,'Everything',42);"));
+      for (int group = 1; group <= max_groups; group++)
+      {
+        oappend(SET_F("addInfo('"));
+        oappend(String(FPSTR(_name)).c_str());
+        oappend(SET_F(":group"));
+        oappend(String(group, 10).c_str());
+        oappend(SET_F(":scale")); 
+        oappend(SET_F("',1,'<i>Local brightness value for each group between 0 and 255.</i>');"));
+        
+        oappend(SET_F("addInfo('"));
+        oappend(String(FPSTR(_name)).c_str());
+        oappend(SET_F(":group"));
+        oappend(String(group, 10).c_str());
+        oappend(SET_F(":pixels"));
+        oappend(SET_F("',1,'Associated group for each physical pixel. Invalid or no group # will result in no impact on the pixel brightness.');"));
+      }
     }
 
 
@@ -302,74 +257,25 @@ class MyExampleUsermod : public Usermod {
      */
     void handleOverlayDraw()
     {
-      //strip.setPixelColor(0, RGBW32(0,0,0,0)) // set the first pixel to black
-    }
+      if (!initDone || !enabled) return;
 
+      // Apply brightness group scaling
+      for (int pixel = 0; pixel < strip.getLengthPhysical(); pixel++)
+      {
+        // Get current color
+        uint32_t c = strip.getPixelColor(pixel);
+        
+        // Breakdown into channels and apply individual brightness scaling
+        uint8_t scale = group_scale[pixel_groups[pixel]];
+        uint8_t w = W(c) * scale / 100.0;
+        uint8_t r = R(c) * scale / 100.0;
+        uint8_t g = G(c) * scale / 100.0;
+        uint8_t b = B(c) * scale / 100.0;
 
-    /**
-     * handleButton() can be used to override default button behaviour. Returning true
-     * will prevent button working in a default way.
-     * Replicating button.cpp
-     */
-    bool handleButton(uint8_t b) {
-      yield();
-      // ignore certain button types as they may have other consequences
-      if (!enabled
-       || buttonType[b] == BTN_TYPE_NONE
-       || buttonType[b] == BTN_TYPE_RESERVED
-       || buttonType[b] == BTN_TYPE_PIR_SENSOR
-       || buttonType[b] == BTN_TYPE_ANALOG
-       || buttonType[b] == BTN_TYPE_ANALOG_INVERTED) {
-        return false;
+        // Recreate and set the color
+        strip.setPixelColor(pixel, RGBW32(r, g, b, w));
       }
-
-      bool handled = false;
-      // do your button handling here
-      return handled;
     }
-  
-
-#ifndef WLED_DISABLE_MQTT
-    /**
-     * handling of MQTT message
-     * topic only contains stripped topic (part after /wled/MAC)
-     */
-    bool onMqttMessage(char* topic, char* payload) {
-      // check if we received a command
-      //if (strlen(topic) == 8 && strncmp_P(topic, PSTR("/command"), 8) == 0) {
-      //  String action = payload;
-      //  if (action == "on") {
-      //    enabled = true;
-      //    return true;
-      //  } else if (action == "off") {
-      //    enabled = false;
-      //    return true;
-      //  } else if (action == "toggle") {
-      //    enabled = !enabled;
-      //    return true;
-      //  }
-      //}
-      return false;
-    }
-
-    /**
-     * onMqttConnect() is called when MQTT connection is established
-     */
-    void onMqttConnect(bool sessionPresent) {
-      // do any MQTT related initialisation here
-      //publishMqtt("I am alive!");
-    }
-#endif
-
-
-    /**
-     * onStateChanged() is used to detect WLED state change
-     * @mode parameter is CALL_MODE_... parameter used for notifications
-     */
-    void onStateChange(uint8_t mode) {
-      // do something if WLED state changed (color, brightness, effect, preset, etc)
-    }
-
 
     /*
      * getId() allows you to optionally give your V2 usermod an unique ID (please define it in const.h!).
@@ -377,30 +283,13 @@ class MyExampleUsermod : public Usermod {
      */
     uint16_t getId()
     {
-      return USERMOD_ID_EXAMPLE;
+      return USERMOD_ID_BRIGHTNESS_GROUPS;
     }
 
    //More methods can be added in the future, this example will then be extended.
    //Your usermod will remain compatible as it does not need to implement all methods from the Usermod base class!
 };
 
-
 // add more strings here to reduce flash memory usage
-const char MyExampleUsermod::_name[]    PROGMEM = "ExampleUsermod";
-const char MyExampleUsermod::_enabled[] PROGMEM = "enabled";
-
-
-// implementation of non-inline member methods
-
-void MyExampleUsermod::publishMqtt(const char* state, bool retain)
-{
-#ifndef WLED_DISABLE_MQTT
-  //Check if MQTT Connected, otherwise it will crash the 8266
-  if (WLED_MQTT_CONNECTED) {
-    char subuf[64];
-    strcpy(subuf, mqttDeviceTopic);
-    strcat_P(subuf, PSTR("/example"));
-    mqtt->publish(subuf, 0, retain, state);
-  }
-#endif
-}
+const char UsermodBrightnessGroups::_name[]    PROGMEM = "BrightnessGroups";
+const char UsermodBrightnessGroups::_enabled[] PROGMEM = "enabled";
