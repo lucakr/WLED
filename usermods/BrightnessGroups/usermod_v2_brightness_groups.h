@@ -55,7 +55,7 @@ class UsermodBrightnessGroups : public Usermod {
     inline bool isEnabled() { return enabled; }
 
     void process_pixel_group_str(uint8_t group, char *pixel_group_str) {
-      if (!initDone) return;
+      if (pixel_groups == NULL) return;
 
       char *token = NULL;
       char delim[2] = ",";
@@ -65,7 +65,7 @@ class UsermodBrightnessGroups : public Usermod {
       while (token != NULL)
       {
         pixel = atoi(token);
-        if (pixel != 0 && pixel <= strip.getLengthPhysical())
+        if (pixel > 0 && pixel <= strip.getLengthPhysical())
         {
           pixel_groups[pixel-1] = group;
         }
@@ -171,8 +171,8 @@ class UsermodBrightnessGroups : public Usermod {
       {
         groupName[6] = group + '0';
         JsonObject groupJson = top.createNestedObject(groupName);
-        groupJson["scale"] = group_scale[group];
-        groupJson["pixels"] = generate_formatted_pixel_group(group);
+        groupJson["Factor"] = group_scale[group];
+        groupJson["Pixel List"] = generate_formatted_pixel_group(group);
       }
     }
 
@@ -200,23 +200,29 @@ class UsermodBrightnessGroups : public Usermod {
       JsonObject top = root[FPSTR(_name)];
 
       bool configComplete = !top.isNull();
+
+      configComplete &= getJsonValue(top["enabled"], enabled);
       
-      String groupName = "group0";
+      // Setup if we need to
+      if (pixel_groups == NULL)
+      {
+        pixel_groups = (byte*) malloc(strip.getLengthPhysical());
+        if (!pixel_groups) { DEBUG_PRINTLN(F("!!! BrightnessGroup allocation failed. !!!")); return false; } //allocation failed   
+      }
+
+      // Reset the pixel groups to 0 before reading them again
+      memset(pixel_groups, 0, strip.getLengthPhysical());
+
+      String groupName = "Group 0";
       String pixelGroup = "";
       for (int group = 1; group <= max_groups; group++)
       {
-        groupName[5] = group + '0';
+        groupName[6] = group + '0';
 
-        configComplete &= getJsonValue(top[groupName]["scale"], group_scale[group], 100);
+        configComplete &= getJsonValue(top[groupName]["Factor"], group_scale[group], 100);
         if (group_scale[group] > 100) group_scale[group] = 100;
 
-        configComplete &= getJsonValue(top[groupName]["pixels"], pixelGroup, "");
-        if (pixel_groups == NULL)
-        {
-          pixel_groups = (byte*) malloc(strip.getLengthPhysical());
-          if (!pixel_groups) { DEBUG_PRINTLN(F("!!! BrightnessGroup allocation failed. !!!")); return false; } //allocation failed   
-        }
-        
+        configComplete &= getJsonValue(top[groupName]["Pixel List"], pixelGroup, "");
         process_pixel_group_str(group, strdup(pixelGroup.c_str()));
       }
 
@@ -235,17 +241,17 @@ class UsermodBrightnessGroups : public Usermod {
       {
         oappend(SET_F("addInfo('"));
         oappend(String(FPSTR(_name)).c_str());
-        oappend(SET_F(":group"));
+        oappend(SET_F(":Group "));
         oappend(String(group, 10).c_str());
-        oappend(SET_F(":scale")); 
-        oappend(SET_F("',1,'<i>Local brightness value for each group between 0 and 255.</i>');"));
+        oappend(SET_F(":Factor")); 
+        oappend(SET_F("',1,'%',':');"));
         
         oappend(SET_F("addInfo('"));
         oappend(String(FPSTR(_name)).c_str());
-        oappend(SET_F(":group"));
+        oappend(SET_F(":Group "));
         oappend(String(group, 10).c_str());
-        oappend(SET_F(":pixels"));
-        oappend(SET_F("',1,'Associated group for each physical pixel. Invalid or no group # will result in no impact on the pixel brightness.');"));
+        oappend(SET_F(":Pixel List"));
+        oappend(SET_F("',1,'',':');"));
       }
     }
 
@@ -291,5 +297,5 @@ class UsermodBrightnessGroups : public Usermod {
 };
 
 // add more strings here to reduce flash memory usage
-const char UsermodBrightnessGroups::_name[]    PROGMEM = "BrightnessGroups";
+const char UsermodBrightnessGroups::_name[]    PROGMEM = "Brightness Groups";
 const char UsermodBrightnessGroups::_enabled[] PROGMEM = "enabled";
